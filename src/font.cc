@@ -21,17 +21,34 @@
 #include <stdexcept>
 #include <string>
 
+namespace
+{
+
+std::string locateFontFile(FcPattern *pattern)
+{
+   std::string file_name;
+   if (pattern)
+   {
+      FcChar8* buf = nullptr;
+      FcPatternGetString(pattern, FC_FILE, 0, &buf);
+      if (buf) file_name = std::string((const char *)buf);
+   }
+   return file_name;
+}
+
+}
+
 namespace zutty
 {
-   Font::Font (const std::string& filename_)
-      : filename (filename_)
+   Font::Font (FcPattern* font_)
+      : font (font_, [](FcPattern* p) { FcPatternDestroy(p); })
       , overlay (false)
    {
       load ();
    }
 
-   Font::Font (const std::string& filename_, const Font& priFont, Overlay_)
-      : filename (filename_)
+   Font::Font (FcPattern* font_, const Font& priFont, Overlay_)
+      : font (font_, [](FcPattern* p) { FcPatternDestroy(p); })
       , overlay (true)
       , px (priFont.getPx ())
       , py (priFont.getPy ())
@@ -44,8 +61,8 @@ namespace zutty
       load ();
    }
 
-   Font::Font (const std::string& filename_, const Font& priFont, DoubleWidth_)
-      : filename (filename_)
+   Font::Font (FcPattern* font_, const Font& priFont, DoubleWidth_)
+      : font (font_, [](FcPattern* p) { FcPatternDestroy(p); })
       , dwidth (true)
       , px (2 * priFont.getPx ())
       , py (priFont.getPy ())
@@ -74,12 +91,62 @@ namespace zutty
 
       if (FT_Init_FreeType (&ft))
          throw std::runtime_error ("Could not initialize FreeType library");
+      std::string filename = locateFontFile(font.get());
       logI << "Loading " << filename << " as "
            << (overlay ? "overlay" : (dwidth ? "double-width" : "primary"))
            << std::endl;
       if (FT_New_Face (ft, filename.c_str (), 0, &face))
          throw std::runtime_error (std::string ("Failed to load font ") +
                                    filename);
+
+      double ptSize;
+      double dpi;
+      int pixelSize, antialias, hinting, hint_style;
+
+      if (FcPatternGetDouble(font.get(), FC_SIZE, 0, &ptSize) == FcResultMatch)
+      {
+         FcPatternGetDouble(font.get(), FC_DPI, 0, &dpi);
+         pixelSize = (int)(ptSize * dpi / 72);
+         logI << "Font size " << ptSize << " @ " << dpi << " DPI" << std::endl;
+      }
+      else
+      {
+         FcPatternGetInteger(font.get(), FC_PIXEL_SIZE, 0, &pixelSize);
+      }
+      if (FcPatternGetBool(font.get(), FC_ANTIALIAS, 0, &antialias) != FcResultMatch)
+      {
+         antialias = FcTrue;
+      }
+      if (FcPatternGetBool(font.get(), FC_HINTING, 0, &hinting) != FcResultMatch)
+      {
+         hinting = FcTrue;
+      }
+      if (FcPatternGetInteger(font.get(), FC_HINT_STYLE, 0, &hint_style) != FcResultMatch)
+      {
+         hint_style = FC_HINT_FULL;
+      }
+      if (!hinting || hint_style == FC_HINT_NONE)
+      {
+         glyph_load_flags |= FT_LOAD_NO_HINTING;
+      }
+      if (antialias)
+      {
+         if (FC_HINT_NONE < hint_style && hint_style < FC_HINT_FULL)
+         {
+            glyph_load_flags |= FT_LOAD_TARGET_LIGHT;
+            glyph_render_mode = FT_RENDER_MODE_LIGHT;
+         }
+         else
+         {
+            glyph_load_flags |= FT_LOAD_TARGET_NORMAL;
+            glyph_render_mode = FT_RENDER_MODE_NORMAL;
+         }
+      }
+      else
+      {
+         glyph_load_flags |= FT_LOAD_TARGET_MONO;
+         glyph_render_mode = FT_RENDER_MODE_MONO;
+      }
 
       /* Determine the number of glyphs to actually load, based on wcwidth ()
        * We need this number up front to compute the atlas geometry.
@@ -104,9 +171,9 @@ namespace zutty
            << std::endl;
 
       if (face->num_fixed_sizes > 0)
-         loadFixed (face);
+         loadFixed (face, pixelSize);
       else
-         loadScaled (face);
+         loadScaled (face, pixelSize);
 
       /* Given that we have num_glyphs glyphs to load, with each
        * individual glyph having a size of px * py, compute nx and ny so
@@ -185,7 +252,7 @@ namespace zutty
       FT_Done_FreeType (ft);
    }
 
-   void Font::loadFixed (const FT_Face& face)
+   void Font::loadFixed (const FT_Face& face, int pixelSize)
    {
       int bestIdx = -1;
       int bestHeightDiff = std::numeric_limits<int>::max ();
@@ -197,7 +264,7 @@ namespace zutty
             oss << " " << face->available_sizes[i].width
                 << "x" << face->available_sizes[i].height;
 
-            int diff = abs (opts.fontsize - face->available_sizes[i].height);
+            int diff = abs (pixelSize - face->available_sizes[i].height);
             if (diff < bestHeightDiff)
             {
                bestIdx = i;
@@ -207,7 +274,7 @@ namespace zutty
          logT << oss.str () << std::endl;
       }
 
-      logT << "Configured size: " << (int)opts.fontsize
+      logT << "Configured size: " << (int)pixelSize
            << "; Best matching fixed size: "
            << face->available_sizes[bestIdx].width
            << "x" << face->available_sizes[bestIdx].height
@@ -217,7 +284,7 @@ namespace zutty
       {
          logT << "Size mismatch too large, fallback to rendering outlines."
               << std::endl;
-         loadScaled (face);
+         loadScaled (face, pixelSize);
          return;
       }
 
@@ -227,11 +294,11 @@ namespace zutty
       {
          if (px != facesize.width)
             throw std::runtime_error (
-               filename + ": size mismatch, expected px=" + std::to_string (px)
+               "Overlay font size mismatch, expected px=" + std::to_string (px)
                + ", got: " + std::to_string (facesize.width));
          if (py != facesize.height)
             throw std::runtime_error (
-               filename + ": size mismatch, expected py=" + std::to_string (py)
+               "Overlay font size mismatch, expected py=" + std::to_string (py)
                + ", got: " + std::to_string (facesize.height));
       }
       else
@@ -242,7 +309,7 @@ namespace zutty
       }
       logI << "Glyph size " << px << "x" << py << std::endl;
 
-      if (FT_Set_Pixel_Sizes (face, px, py))
+      if (FT_Set_Pixel_Sizes (face, 0, py))
          throw std::runtime_error ("Could not set pixel sizes");
 
       if (!overlay && face->height)
@@ -253,13 +320,9 @@ namespace zutty
       }
    }
 
-   void Font::loadScaled (const FT_Face& face)
+   void Font::loadScaled (const FT_Face& face, int pixelSize)
    {
-      logI << "Pixel size " << (int)opts.fontsize << std::endl;
-      if (FT_Set_Pixel_Sizes (face, opts.fontsize, opts.fontsize))
-         throw std::runtime_error ("Could not set pixel sizes");
-
-      int tpx = opts.fontsize *
+      int tpx = pixelSize *
          (double)face->max_advance_width / face->units_per_EM;
       int tpy = tpx * (double)face->height / face->max_advance_width + 1;
       if (!overlay && !dwidth)
@@ -272,6 +335,8 @@ namespace zutty
          baseline = tpy * (double)face->ascender / face->height;
       }
       logI << "Glyph size " << px << "x" << py << std::endl;
+      if (FT_Set_Pixel_Sizes (face, 0, pixelSize))
+         throw std::runtime_error ("Could not set pixel sizes");
    }
 
    void Font::loadFace (const FT_Face& face, FT_ULong c)
@@ -297,11 +362,18 @@ namespace zutty
          return;
       }
 
-      if (FT_Load_Char (face, c, FT_LOAD_RENDER))
+      if (FT_Load_Char (face, c, glyph_load_flags))
       {
-         throw std::runtime_error (
-            std::string ("FreeType: Failed to load glyph for char ") +
-            std::to_string (c));
+         logW << "Failed to load glyph for char " << c << std::endl;
+         return;
+      }
+      if (face->glyph->format != FT_GLYPH_FORMAT_BITMAP)
+      {
+         if (FT_Render_Glyph (face->glyph, glyph_render_mode))
+         {
+            logW << "Failed to render glyph for char " << c << std::endl;
+            return;
+         }
       }
 
       // destination pixel offset

@@ -13,11 +13,13 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include <fontconfig/fontconfig.h>
 
 #include <cstdint>
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace zutty
 {
@@ -30,7 +32,7 @@ namespace zutty
       /* Load a primary font, determining the atlas geometry and setting up
        * a mapping from unicode code points to atlas grid positions.
        */
-      explicit Font (const std::string& filename);
+      explicit Font (FcPattern* font);
 
       /* Load an alternate font based on an already loaded primary font,
        * conforming to the same atlas geometry (incl. position mapping)
@@ -42,7 +44,7 @@ namespace zutty
        * Any code point not having a glyph in the primary font will be
        * discarded.
        */
-      Font (const std::string& filename, const Font& priFont, Overlay_);
+      Font (FcPattern* font, const Font& priFont, Overlay_);
 
       /* Load a double-width font based on an already loaded primary font.
        * A double-width font is less tightly coupled to the primary,
@@ -52,7 +54,7 @@ namespace zutty
        * Only code points that are considered double-width by wcwidth ()
        * will be loaded.
        */
-      Font (const std::string& filename, const Font& priFont, DoubleWidth_);
+      Font (FcPattern* font, const Font& priFont, DoubleWidth_);
 
       ~Font () = default;
 
@@ -74,9 +76,11 @@ namespace zutty
       const AtlasMap& getAtlasMap () const { return atlasMap; };
 
    private:
-      std::string filename;
+      std::shared_ptr<FcPattern> font;
       bool overlay = false;
       bool dwidth = false;
+      int glyph_load_flags = 0;
+      FT_Render_Mode glyph_render_mode;
       uint16_t px = 0; // glyph width in pixels
       uint16_t py = 0; // glyph height in pixels
       uint16_t baseline = 0; // number of pixels above baseline
@@ -101,8 +105,8 @@ namespace zutty
        */
       bool isLoadableChar (FT_ULong c);
       void load ();
-      void loadFixed (const FT_Face& face);
-      void loadScaled (const FT_Face& face);
+      void loadFixed (const FT_Face& face, int pixelSize);
+      void loadScaled (const FT_Face& face, int pixelSize);
       void loadFace (const FT_Face& face, FT_ULong c);
       void loadFace (const FT_Face& face, FT_ULong c, const AtlasPos& apos);
    };

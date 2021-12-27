@@ -57,11 +57,10 @@ namespace zutty
       {"border",      SepArg,   nullptr,   "2",       "Border width in pixels"},
       {"cr",          SepArg,   nullptr,   nullptr,   "Cursor color"},
       {"display",     SepArg,   nullptr,   nullptr,   "Display to connect to"},
-      {"dwfont",      SepArg,   nullptr,   "18x18ja", "Double-width font to use"},
+      {"dpi",         SepArg,   nullptr,   nullptr,   "Display resolution"},
+      {"dwfont",      SepArg,   nullptr,   "",        "Double-width font to use"},
       {"fg",          SepArg,   nullptr,   "#fff",    "Foreground color"},
       {"font",        SepArg,   nullptr,   "9x18",    "Font to use"},
-      {"fontsize",    SepArg,   nullptr,   "16",      "Font size"},
-      {"fontpath",    SepArg,   nullptr,   fontpath,  "Font search path"},
       {"geometry",    SepArg,   nullptr,   "80x24",   "Terminal size in chars"},
       {"glinfo",      NoArg,    "true",    "false",   "Print OpenGL information"},
       {"help",        NoArg,    "true",    "false",   "Print usage listing and quit"},
@@ -106,16 +105,15 @@ namespace zutty
    struct Options
    {
       // N.B.: no static initializers - will decode hardDefault fields above!
-      uint8_t fontsize;
       uint8_t modifyOtherKeys;
       uint16_t border;
       uint16_t nCols;
       uint16_t nRows;
       uint16_t saveLines;
+      uint16_t dpi;
       const char* display;
       const char* dwfontname;
       const char* fontname;
-      const char* fontpath;
       const char* name;
       const char* shell;
       const char* title;

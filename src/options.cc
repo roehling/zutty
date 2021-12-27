@@ -134,21 +134,6 @@ namespace
    }
 
    void
-   getFontsize (uint8_t& outFontsize)
-   {
-      const char* opt = get ("fontsize");
-      if (!opt)
-         throw std::runtime_error ("-fontsize: missing value");
-
-      std::stringstream iss (opt);
-      int fs;
-      iss >> fs;
-      if (iss.fail () || fs < 1 || fs > 255)
-         throw std::runtime_error ("-fontsize: expected integer within 1..255");
-      outFontsize = fs;
-   }
-
-   void
    getGeometry (uint16_t& outCols, uint16_t& outRows)
    {
       const char* opt = get ("geometry");
@@ -301,8 +286,6 @@ namespace zutty
          getSaveLines (saveLines);
          dwfontname = get ("dwfont");
          fontname = get ("font");
-         fontpath = get ("fontpath");
-         getFontsize (fontsize);
          getGeometry (nCols, nRows);
          glinfo = getBool ("glinfo");
          shell = get ("shell", getenv ("SHELL"));
@@ -327,6 +310,7 @@ namespace zutty
          quiet = getBool ("quiet");
          verbose = getBool ("verbose");
          modifyOtherKeys = getInteger ("modifyOtherKeys", 0, 2);
+         dpi = getInteger ("dpi", 0, 65535);
       }
       catch (const std::exception& e)
       {

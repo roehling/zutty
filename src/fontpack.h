@@ -30,8 +30,7 @@ namespace zutty
        * Additionally, a double-width font with the given name is optionally
        * located and initialized.
        */
-      Fontpack (const std::string& fontpath,
-                const std::string& fontname,
+      Fontpack (const std::string& fontname,
                 const std::string& dwfontname);
 
       ~Fontpack () = default;

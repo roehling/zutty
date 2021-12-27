@@ -1324,7 +1324,7 @@ main (int argc, char* argv[])
       }
    }
 
-   fontpk = std::make_unique <Fontpack> (opts.fontpath, opts.fontname,
+   fontpk = std::make_unique <Fontpack> (opts.fontname,
                                          opts.dwfontname);
 
    int winWidth = 2 * opts.border + opts.nCols * fontpk->getPx ();
