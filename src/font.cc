@@ -21,6 +21,8 @@
 #include <stdexcept>
 #include <string>
 
+#include FT_LCD_FILTER_H
+
 namespace
 {
 
@@ -35,6 +37,8 @@ std::string locateFontFile(FcPattern *pattern)
    }
    return file_name;
 }
+
+constexpr unsigned int bytes_per_pixel = 4; // RGBA
 
 }
 
@@ -101,7 +105,7 @@ namespace zutty
 
       double ptSize;
       double dpi;
-      int pixelSize, antialias, hinting, hint_style;
+      int pixelSize, antialias, hinting, hint_style, rgba, lcd_filter, autohint;
 
       if (FcPatternGetDouble(font.get(), FC_SIZE, 0, &ptSize) == FcResultMatch)
       {
@@ -125,6 +129,22 @@ namespace zutty
       {
          hint_style = FC_HINT_FULL;
       }
+      if (FcPatternGetInteger(font.get(), FC_RGBA, 0, &rgba) != FcResultMatch)
+      {
+         rgba = FC_RGBA_UNKNOWN;
+      }
+      if (FcPatternGetInteger(font.get(), FC_LCD_FILTER, 0, &lcd_filter) != FcResultMatch)
+      {
+         lcd_filter = FC_LCD_DEFAULT;
+      }
+      if (FcPatternGetBool(font.get(), FC_AUTOHINT, 0, &autohint) != FcResultMatch)
+      {
+         autohint = FcFalse;
+      }
+      if (autohint)
+      {
+         glyph_load_flags |= FT_LOAD_FORCE_AUTOHINT;
+      }
       if (!hinting || hint_style == FC_HINT_NONE)
       {
          glyph_load_flags |= FT_LOAD_NO_HINTING;
@@ -133,13 +153,31 @@ namespace zutty
       {
          if (FC_HINT_NONE < hint_style && hint_style < FC_HINT_FULL)
          {
-            glyph_load_flags |= FT_LOAD_TARGET_LIGHT;
-            glyph_render_mode = FT_RENDER_MODE_LIGHT;
+            switch (rgba)
+            {
+               case FC_RGBA_RGB:
+               case FC_RGBA_BGR:
+                  glyph_load_flags |= FT_LOAD_TARGET_LIGHT;
+                  glyph_render_mode = FT_RENDER_MODE_LCD;
+                  break;
+               default:
+                  glyph_load_flags |= FT_LOAD_TARGET_LIGHT;
+                  glyph_render_mode = FT_RENDER_MODE_LIGHT;
+            }
          }
          else
          {
-            glyph_load_flags |= FT_LOAD_TARGET_NORMAL;
-            glyph_render_mode = FT_RENDER_MODE_NORMAL;
+            switch (rgba)
+            {
+               case FC_RGBA_RGB:
+               case FC_RGBA_BGR:
+                  glyph_load_flags |= FT_LOAD_TARGET_LCD;
+                  glyph_render_mode = FT_RENDER_MODE_LCD;
+                  break;
+               default:
+                  glyph_load_flags |= FT_LOAD_TARGET_NORMAL;
+                  glyph_render_mode = FT_RENDER_MODE_NORMAL;
+            }
          }
       }
       else
@@ -174,6 +212,8 @@ namespace zutty
          loadFixed (face, pixelSize);
       else
          loadScaled (face, pixelSize);
+
+      FT_Library_SetLcdFilter(ft, (FT_LcdFilter)lcd_filter);
 
       /* Given that we have num_glyphs glyphs to load, with each
        * individual glyph having a size of px * py, compute nx and ny so
@@ -213,7 +253,7 @@ namespace zutty
               << 100.0 * (nx*ny - n_glyphs) / (nx*ny)
               << "%)" << std::endl;
 
-         size_t atlas_bytes = nx * px * ny * py;
+         size_t atlas_bytes = bytes_per_pixel * nx * px * ny * py;
          logT << "Allocating " << atlas_bytes << " bytes for atlas buffer"
               << std::endl;
          atlasBuf.resize (atlas_bytes, 0);
@@ -377,25 +417,31 @@ namespace zutty
       }
 
       // destination pixel offset
+      const unsigned int xskip = face->glyph->bitmap_left < 0
+                              ? -face->glyph->bitmap_left : 0; 
       const unsigned int dx = face->glyph->bitmap_left > 0
                             ? face->glyph->bitmap_left : 0;
       const unsigned int dy = baseline && baseline > face->glyph->bitmap_top
                             ? baseline - face->glyph->bitmap_top : 0;
 
       // raw/rasterized bitmap dimensions
+      const unsigned int tw = glyph_render_mode == FT_RENDER_MODE_LCD ? face->glyph->bitmap.width / 3 : face->glyph->bitmap.width;
       const unsigned int bh = std::min (face->glyph->bitmap.rows, py - dy);
-      const unsigned int bw = std::min (face->glyph->bitmap.width, px - dx);
+      const unsigned int bw = std::min (tw, px - dx);
 
-      const int atlas_row_offset = nx * px * py;
-      const int atlas_glyph_offset = apos.y * atlas_row_offset + apos.x * px;
-      const int atlas_write_offset = atlas_glyph_offset + nx * px * dy + dx;
+      const int atlas_row_offset = bytes_per_pixel * nx * px * py;
+      const int atlas_glyph_offset = apos.y * atlas_row_offset + bytes_per_pixel * apos.x * px;
+      const int atlas_write_offset = atlas_glyph_offset + bytes_per_pixel * (nx * px * dy + dx);
 
       if (overlay) // clear glyph area, as we are overwriting an existing glyph
       {
          for (unsigned int j = 0; j < bh; ++j) {
             uint8_t* atl_dst_row =
-               atlasBuf.data () + atlas_glyph_offset + j * nx * px;
+               atlasBuf.data () + atlas_glyph_offset + bytes_per_pixel * j * nx * px;
             for (unsigned int k = 0; k < bw; ++k) {
+               *atl_dst_row++ = 0;
+               *atl_dst_row++ = 0;
+               *atl_dst_row++ = 0;
                *atl_dst_row++ = 0;
             }
          }
@@ -417,24 +463,45 @@ namespace zutty
       {
       case FT_PIXEL_MODE_MONO:
          for (unsigned int j = 0; j < bh; ++j) {
-            bmp_src_row = bmp.buffer + j * bmp.pitch;
-            atl_dst_row = atlasBuf.data () + atlas_write_offset + j * nx * px;
+            bmp_src_row = bmp.buffer + j * bmp.pitch + xskip;
+            atl_dst_row = atlasBuf.data () + atlas_write_offset + bytes_per_pixel * j * nx * px;
             uint8_t byte = 0;
+            int bl = face->glyph->bitmap_left;
             for (unsigned int k = 0; k < bw; ++k) {
                if (k % 8 == 0) {
                   byte = *bmp_src_row++;
                }
-               *atl_dst_row++ = (byte & 0x80) ? 0xFF : 0;
+               uint8_t val = (byte & 0x80) ? 0xFF : 0;
+               *atl_dst_row++ = val;
+               *atl_dst_row++ = val;
+               *atl_dst_row++ = val;
+               atl_dst_row++;
                byte <<= 1;
             }
          }
          break;
       case FT_PIXEL_MODE_GRAY:
          for (unsigned int j = 0; j < bh; ++j) {
-            bmp_src_row = bmp.buffer + j * bmp.pitch;
-            atl_dst_row = atlasBuf.data () + atlas_write_offset + j * nx * px;
+            bmp_src_row = bmp.buffer + j * bmp.pitch + xskip;
+            atl_dst_row = atlasBuf.data () + atlas_write_offset + bytes_per_pixel * j * nx * px;
             for (unsigned int k = 0; k < bw; ++k) {
+               uint8_t val = *bmp_src_row++;
+               *atl_dst_row++ = val;
+               *atl_dst_row++ = val;
+               *atl_dst_row++ = val;
+               atl_dst_row++;
+            }
+         }
+         break;
+      case FT_PIXEL_MODE_LCD:
+         for (unsigned int j = 0; j < bh; ++j) {
+            bmp_src_row = bmp.buffer + j * bmp.pitch + 3 * xskip;
+            atl_dst_row = atlasBuf.data () + atlas_write_offset + bytes_per_pixel * j * nx * px;
+            for (unsigned int k = 0; k < bw; k++) {
                *atl_dst_row++ = *bmp_src_row++;
+               *atl_dst_row++ = *bmp_src_row++;
+               *atl_dst_row++ = *bmp_src_row++;
+               atl_dst_row++;
             }
          }
          break;

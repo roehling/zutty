@@ -147,8 +147,8 @@ void main ()
          {
             ivec2 txCoords = atlasPos * srcGlyphPixels + ivec2 (j, k);
             ivec3 txc = ivec3 (txCoords, fontIdx);
-            float lumi = texelFetch (atlas, txc, 0).r;
-            vec4 pixel = vec4 (fgColor * lumi + bgColor * (1.0 - lumi), 1.0);
+            vec3 glyph = texelFetch (atlas, txc, 0).rgb;
+            vec4 pixel = vec4 (fgColor * glyph + bgColor * (1.0 - glyph), 1.0);
             ivec2 pxCoords = charPos * glyphPixels + ivec2 (j, k);
             imageStore (imgOut, pxCoords, pixel);
          }
@@ -162,8 +162,8 @@ void main ()
          {
             ivec2 txCoords = atlasPos * srcGlyphPixels + ivec2 (j, k);
             ivec3 txc = ivec3 (txCoords, fontIdx);
-            float lumi = texelFetch (atlas_dw, txc, 0).r;
-            vec4 pixel = vec4 (fgColor * lumi + bgColor * (1.0 - lumi), 1.0);
+            vec3 glyph = texelFetch (atlas, txc, 0).rgb;
+            vec4 pixel = vec4 (fgColor * glyph + bgColor * (1.0 - glyph), 1.0);
             ivec2 pxCoords = charPos * glyphPixels + ivec2 (j, k);
             imageStore (imgOut, pxCoords, pixel);
          }
@@ -324,7 +324,7 @@ void main ()
                       fnt.getPx () * fnt.getNx (),
                       fnt.getPy () * fnt.getNy (),
                       1,    // number of layers, i.e., fonts, loaded
-                      GL_RED, GL_UNSIGNED_BYTE, fnt.getAtlasData ());
+                      GL_RGBA, GL_UNSIGNED_BYTE, fnt.getAtlasData ());
       glCheckError ();
    }
 
@@ -438,7 +438,7 @@ namespace zutty
       // Setup atlas texture
       setupTexture (GL_TEXTURE1, GL_TEXTURE_2D_ARRAY, T_atlas);
       const Font& reg = fontpk->getRegular ();
-      glTexStorage3D (GL_TEXTURE_2D_ARRAY, 1, GL_R8,
+      glTexStorage3D (GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8,
                       reg.getPx () * reg.getNx (),
                       reg.getPy () * reg.getNy (),
                       4); // number of layers
@@ -474,7 +474,7 @@ namespace zutty
 
          setupTexture (GL_TEXTURE3, GL_TEXTURE_2D_ARRAY, T_atlas_dw);
          const Font& dw = fontpk->getDoubleWidth ();
-         glTexStorage3D (GL_TEXTURE_2D_ARRAY, 1, GL_R8,
+         glTexStorage3D (GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8,
                          dw.getPx () * dw.getNx (),
                          dw.getPy () * dw.getNy (),
                          1); // number of layers
