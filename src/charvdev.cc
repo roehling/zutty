@@ -162,7 +162,7 @@ void main ()
          {
             ivec2 txCoords = atlasPos * srcGlyphPixels + ivec2 (j, k);
             ivec3 txc = ivec3 (txCoords, fontIdx);
-            vec3 glyph = texelFetch (atlas, txc, 0).rgb;
+            vec3 glyph = texelFetch (atlas_dw, txc, 0).rgb;
             vec4 pixel = vec4 (fgColor * glyph + bgColor * (1.0 - glyph), 1.0);
             ivec2 pxCoords = charPos * glyphPixels + ivec2 (j, k);
             imageStore (imgOut, pxCoords, pixel);
